@@ -63,21 +63,6 @@
     .gps-dot.show { display: block; }
     .gps-dot.off { background: #e8521a; }
     .gps-dot.stale { background: #9aa0a6; }
-    .gps-heading {
-      position: absolute;
-      width: 0; height: 0;
-      border-left: 9px solid transparent;
-      border-right: 9px solid transparent;
-      border-bottom: 16px solid #1a73e8;
-      margin: -16px 0 0 -9px;
-      transform-origin: 9px 16px;
-      z-index: 9;
-      display: none;
-      filter: drop-shadow(0 0 1px rgba(0,0,0,0.6));
-    }
-    .gps-heading.show { display: block; }
-    .gps-heading.off { border-bottom-color: #e8521a; }
-    .gps-heading.stale { border-bottom-color: #9aa0a6; }
     #toTrail {
       position: absolute;
       top: 0; left: 0;
@@ -247,7 +232,6 @@
             stroke-linecap="round" marker-end="url(#arrowHead)" />
         </svg>
         <div id="gpsAcc" class="gps-acc"></div>
-        <div id="gpsHeading" class="gps-heading"></div>
         <div id="gpsDot" class="gps-dot"></div>
       </div>
     </div>
@@ -489,7 +473,6 @@
     const overlay = document.getElementById('overlay');
     const gpsDot = document.getElementById('gpsDot');
     const gpsAcc = document.getElementById('gpsAcc');
-    const gpsHeading = document.getElementById('gpsHeading');
 
     let scale = 1;
     let panX = 0;
@@ -709,40 +692,6 @@
         (curRD / 1000).toFixed(1) + '/' + Math.round(ROUTE_TOTAL / 1000) + ' km · ' + pct + '%';
     }
 
-    // --- compass heading (device orientation) ---
-    let headingDeg = null;
-    function applyHeading() {
-      if (headingDeg == null || !gpsDot.classList.contains('show') || !lastGpsMap) {
-        gpsHeading.classList.remove('show');
-        return;
-      }
-      gpsHeading.style.left = lastGpsMap.x + 'px';
-      gpsHeading.style.top = lastGpsMap.y + 'px';
-      gpsHeading.style.transform = 'rotate(' + headingDeg + 'deg)';
-      gpsHeading.classList.toggle('off', gpsDot.classList.contains('off'));
-      gpsHeading.classList.toggle('stale', gpsDot.classList.contains('stale'));
-      gpsHeading.classList.add('show');
-    }
-    function onOrient(e) {
-      let h = null;
-      if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading; // iOS
-      else if (e.alpha != null) h = 360 - e.alpha; // Android (absolute)
-      if (h != null && !Number.isNaN(h)) {
-        headingDeg = h;
-        applyHeading();
-      }
-    }
-    window.addEventListener('deviceorientationabsolute', onOrient, true);
-    window.addEventListener('deviceorientation', onOrient, true);
-    function requestOrientationPermission() {
-      if (typeof DeviceOrientationEvent !== 'undefined' &&
-          typeof DeviceOrientationEvent.requestPermission === 'function') {
-        DeviceOrientationEvent.requestPermission()
-          .then(s => { if (s === 'granted') window.addEventListener('deviceorientation', onOrient, true); })
-          .catch(() => {});
-      }
-    }
-
     // --- GPS staleness watchdog ---
     let lastFixMs = null;
     const STALE_MS = 15000;
@@ -752,7 +701,6 @@
       if (age > STALE_MS) {
         gpsStatus.textContent = 'stale ' + Math.round(age / 1000) + 's';
         gpsDot.classList.add('stale');
-        gpsHeading.classList.add('stale');
       }
     }, 3000);
 
@@ -762,7 +710,6 @@
       lastFixMs = Date.now();
       gpsStatus.textContent = 'on';
       gpsDot.classList.remove('stale');
-      gpsHeading.classList.remove('stale');
       accEl.textContent = accuracy ? Math.round(accuracy) : '–';
       altEl.textContent = formatAlt(altitude, altitudeAccuracy);
 
@@ -790,7 +737,6 @@
       gpsDot.style.top = my + 'px';
       gpsDot.classList.add('show');
       gpsDot.classList.toggle('off', isOff);
-      applyHeading();
 
       // fixed-length arrow from the dot pointing toward the closest point on the trail
       const toTrail = document.getElementById('toTrail');
@@ -944,7 +890,6 @@
       follow = true;
       document.getElementById('followBtn').classList.add('on');
       showToast('Requesting location… tap <b>Allow</b> if your phone asks.');
-      requestOrientationPermission();
       startGps();
     });
 

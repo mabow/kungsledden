@@ -1,4 +1,4 @@
-const CACHE = 'kl-gps-pages-v7-closesthut';
+const CACHE = 'kl-gps-pages-v8-nocompass';
 const PRECACHE = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
