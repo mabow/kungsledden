@@ -115,23 +115,23 @@
       gap: 10px;
     }
     .btn {
-      width: 52px; height: 52px;
+      width: 36px; height: 36px;
       border-radius: 50%;
       border: none;
       background: #fff;
       color: #1a4d8c;
-      font-size: 11px;
+      font-size: 13px;
       font-weight: 800;
-      box-shadow: 0 2px 10px rgba(0,0,0,0.45);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.45);
       cursor: pointer;
     }
     .btn:active { background: #dde8f0; }
     .btn.on { background: #1a73e8; color: #fff; }
     .btn.wide {
       width: auto; height: auto;
-      border-radius: 22px;
-      padding: 10px 14px;
-      font-size: 10px;
+      border-radius: 15px;
+      padding: 7px 10px;
+      font-size: 9px;
     }
 
     .toast {
@@ -248,6 +248,7 @@
   <div class="controls">
     <button type="button" class="btn on" id="followBtn" title="Follow">◎</button>
     <button type="button" class="btn" id="fitBtn" title="Fit route">⤢</button>
+    <button type="button" class="btn wide" id="saverBtn" title="Battery saver GPS">saver</button>
     <button type="button" class="btn" id="testToggle" title="GPS test panel">ⓘ</button>
     <button type="button" class="btn wide" id="campsBtn" style="display:none">camps</button>
     <button type="button" class="btn wide" id="gpsBtn" title="Allow location">enable GPS</button>
@@ -859,17 +860,41 @@
       showToast(msg);
     }
 
+    /* GPS engine with two modes:
+       - continuous: watchPosition, high accuracy (smoothest, highest battery)
+       - saver: a fix roughly every SAVER_INTERVAL_MS with the radio off between,
+         so the GPS chip can sleep. Best for walking pace; default on. */
+    const SAVER_INTERVAL_MS = 10000;
+    let saverMode = localStorage.getItem('kl-gps-saver') !== '0'; // default ON
     let gpsWatchId = null;
+    let saverTimer = null;
+
+    function stopGps() {
+      if (gpsWatchId !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+      }
+      if (saverTimer !== null) {
+        clearTimeout(saverTimer);
+        saverTimer = null;
+      }
+    }
+
+    function saverTick() {
+      navigator.geolocation.getCurrentPosition(
+        pos => { onPosition(pos); saverTimer = setTimeout(saverTick, SAVER_INTERVAL_MS); },
+        err => { onError(err); saverTimer = setTimeout(saverTick, SAVER_INTERVAL_MS); },
+        { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 }
+      );
+    }
+
     function startGps() {
       if (!('geolocation' in navigator)) {
         gpsStatus.textContent = 'n/a';
         showToast('No geolocation in this browser.');
         return;
       }
-      if (gpsWatchId !== null) {
-        navigator.geolocation.clearWatch(gpsWatchId);
-        gpsWatchId = null;
-      }
+      stopGps();
       gpsStatus.textContent = '…';
       // explicit one-shot request forces the Allow/Block prompt on a user tap
       navigator.geolocation.getCurrentPosition(onPosition, onError, {
@@ -877,12 +902,36 @@
         maximumAge: 0,
         timeout: 20000,
       });
-      gpsWatchId = navigator.geolocation.watchPosition(onPosition, onError, {
-        enableHighAccuracy: true,
-        maximumAge: 1500,
-        timeout: 20000,
-      });
+      if (saverMode) {
+        saverTimer = setTimeout(saverTick, SAVER_INTERVAL_MS);
+      } else {
+        gpsWatchId = navigator.geolocation.watchPosition(onPosition, onError, {
+          enableHighAccuracy: true,
+          maximumAge: 1500,
+          timeout: 20000,
+        });
+      }
     }
+
+    function updateSaverBtn() {
+      const b = document.getElementById('saverBtn');
+      b.textContent = saverMode ? 'saver' : 'cont';
+      b.classList.toggle('on', saverMode);
+      b.title = saverMode
+        ? 'Battery saver: fix every ' + (SAVER_INTERVAL_MS / 1000) + 's (tap for continuous)'
+        : 'Continuous GPS (tap for battery saver)';
+    }
+
+    document.getElementById('saverBtn').addEventListener('click', () => {
+      saverMode = !saverMode;
+      localStorage.setItem('kl-gps-saver', saverMode ? '1' : '0');
+      updateSaverBtn();
+      showToast(saverMode
+        ? 'Battery saver: GPS fix every ' + (SAVER_INTERVAL_MS / 1000) + 's.'
+        : 'Continuous GPS (higher battery use).', true);
+      startGps();
+    });
+    updateSaverBtn();
 
     document.getElementById('gpsBtn').addEventListener('click', () => {
       follow = true;
