@@ -59,6 +59,7 @@
       display: none;
     }
     .gps-dot.show { display: block; }
+    .gps-dot.off { background: #e8521a; }
     .gps-acc {
       position: absolute;
       border-radius: 50%;
@@ -217,6 +218,7 @@
     <div>GPS <span id="gpsStatus">off</span></div>
     <div>±<span id="acc">–</span> m</div>
     <div>alt <span id="alt">–</span> m</div>
+    <div>trail <span id="trail">–</span></div>
     <div>next <span id="nearest">–</span></div>
     <div>zoom <span id="zoomPct">100</span>%</div>
   </div>
@@ -237,6 +239,7 @@
     <div class="row"><span>lon</span><span class="val" id="tLon">–</span></div>
     <div class="row"><span>±m</span><span class="val" id="tAcc">–</span></div>
     <div class="row"><span>alt m</span><span class="val" id="tAlt">–</span></div>
+    <div class="row"><span>off trail</span><span class="val" id="tTrail">–</span></div>
     <div class="row"><span>map px</span><span class="val" id="tPx">–</span></div>
     <div class="row"><span>status</span><span class="val" id="tStatus">waiting…</span></div>
     <div class="row"><span>updated</span><span class="val" id="tTime">–</span></div>
@@ -244,6 +247,7 @@
     <div class="gps-test-btns" id="testBtns"></div>
   </div>
 
+  <script src="trail-route.js"></script>
   <script>
     const MAP_W = 1651;
     const MAP_H = 2788;
@@ -375,6 +379,40 @@
     function projectCamp(camp) {
       if (camp.x != null) return { x: camp.x, y: camp.y };
       return projectOnTrail(camp.lat, camp.lon);
+    }
+
+    /* Off-trail detection against the detailed 112 km route (TRAIL_ROUTE = [[lat,lon],…]).
+       Returns nearest point on the route (geo) and metres-off, using a local
+       equirectangular metric that is accurate over this small area. */
+    const ROUTE = (typeof TRAIL_ROUTE !== 'undefined') ? TRAIL_ROUTE : [];
+    const ROUTE_LAT0 = 68.1;
+    const M_PER_DEG_LON = Math.cos(ROUTE_LAT0 * Math.PI / 180) * 111320;
+    const M_PER_DEG_LAT = 110540;
+
+    function nearestOnRoute(lat, lon) {
+      if (!ROUTE.length) {
+        const p = projectOnTrail(lat, lon);
+        return { dist: null, x: p.x, y: p.y };
+      }
+      const px = lon * M_PER_DEG_LON;
+      const py = lat * M_PER_DEG_LAT;
+      let best = null;
+      for (let i = 0; i < ROUTE.length - 1; i++) {
+        const a = ROUTE[i];
+        const b = ROUTE[i + 1];
+        const ax = a[1] * M_PER_DEG_LON, ay = a[0] * M_PER_DEG_LAT;
+        const bx = b[1] * M_PER_DEG_LON, by = b[0] * M_PER_DEG_LAT;
+        const dx = bx - ax, dy = by - ay;
+        const len2 = dx * dx + dy * dy;
+        let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+        t = Math.max(0, Math.min(1, t));
+        const sx = ax + t * dx, sy = ay + t * dy;
+        const d = Math.hypot(px - sx, py - sy);
+        if (!best || d < best.dist) {
+          best = { dist: d, lat: a[0] + t * (b[0] - a[0]), lon: a[1] + t * (b[1] - a[1]) };
+        }
+      }
+      return best;
     }
 
     // --- pan / zoom ---
@@ -592,14 +630,30 @@
       accEl.textContent = accuracy ? Math.round(accuracy) : '–';
       altEl.textContent = formatAlt(altitude, altitudeAccuracy);
 
-      const onTrail = projectOnTrail(latitude, longitude);
-      const mx = onTrail.x;
-      const my = onTrail.y;
+      const near = nearestOnRoute(latitude, longitude);
+      const offTrailThresh = Math.max(50, (accuracy || 25) * 2);
+      const isOff = near.dist != null && near.dist > offTrailThresh;
+
+      let mx;
+      let my;
+      if (isOff) {
+        const p = project(latitude, longitude); // show true position so the gap is visible
+        mx = p.x;
+        my = p.y;
+      } else if (near.lat != null) {
+        const p = project(near.lat, near.lon); // snap to the route for a clean dot
+        mx = p.x;
+        my = p.y;
+      } else {
+        mx = near.x;
+        my = near.y;
+      }
       lastGpsMap = { x: mx, y: my };
 
       gpsDot.style.left = mx + 'px';
       gpsDot.style.top = my + 'px';
       gpsDot.classList.add('show');
+      gpsDot.classList.toggle('off', isOff);
 
       const M_PER_PX = 22.6; // map2-labeled.png ≈ 44 px per km (from hut spacing)
       const accPx = Math.max(6, (accuracy || 30) / M_PER_PX);
@@ -618,14 +672,33 @@
       document.getElementById('tPx').textContent = Math.round(mx) + ', ' + Math.round(my);
       document.getElementById('tTime').textContent = new Date().toLocaleTimeString();
 
+      const trailEl = document.getElementById('trail');
+      const tTrailEl = document.getElementById('tTrail');
+      if (near.dist == null) {
+        trailEl.textContent = '–';
+        tTrailEl.textContent = '–';
+      } else if (isOff) {
+        trailEl.textContent = Math.round(near.dist) + ' m off';
+        trailEl.style.color = '#e8521a';
+        tTrailEl.textContent = Math.round(near.dist) + ' m';
+      } else {
+        trailEl.textContent = 'on trail';
+        trailEl.style.color = '';
+        tTrailEl.textContent = Math.round(near.dist) + ' m';
+      }
+
       const offMap = mx < -40 || mx > MAP_W + 40 || my < -40 || my > MAP_H + 40;
       const tStatus = document.getElementById('tStatus');
       if (offMap) {
         tStatus.textContent = 'off map';
         tStatus.className = 'val warn-txt';
         showToast('GPS position is off the map — check you are on the Kungsleden corridor.', true);
+      } else if (isOff) {
+        tStatus.textContent = 'off trail';
+        tStatus.className = 'val warn-txt';
+        showToast('Off trail by ' + Math.round(near.dist) + ' m — check your route.', true);
       } else {
-        tStatus.textContent = 'on map';
+        tStatus.textContent = 'on trail';
         tStatus.className = 'val ok';
       }
 
@@ -657,7 +730,11 @@
       b.addEventListener('click', () => {
         follow = true;
         document.getElementById('followBtn').classList.add('on');
-        simulateGps(a.lat, a.lon, 8, a.elev);
+        // simulate standing on the trail at this hut (snap rounded coords to the route)
+        const n = nearestOnRoute(a.lat, a.lon);
+        const slat = (n && n.lat != null) ? n.lat : a.lat;
+        const slon = (n && n.lon != null) ? n.lon : a.lon;
+        simulateGps(slat, slon, 8, a.elev);
       });
       testBtns.appendChild(b);
     });

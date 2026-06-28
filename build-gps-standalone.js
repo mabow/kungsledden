@@ -12,6 +12,16 @@ let out = srcHtml.replace(
   `<img id="mapImg" src="${dataUri}"`
 );
 
+// Inline the trail route data so off-trail detection works in the single file.
+const trailJs = fs.readFileSync(path.join(dir, 'trail-route.js'), 'utf8');
+if (!out.includes('<script src="trail-route.js"></script>')) {
+  throw new Error('trail-route.js include not found in source HTML.');
+}
+out = out.replace(
+  '<script src="trail-route.js"></script>',
+  '<script>' + trailJs + '</script>'
+);
+
 // Disable the service worker + manifest (not needed for a single offline file).
 out = out.replace(/\s*<link rel="manifest"[^>]*>/, '');
 out = out.replace(
