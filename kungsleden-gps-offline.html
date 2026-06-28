@@ -256,7 +256,7 @@
     <div>±<span id="acc">–</span> m</div>
     <div>alt <span id="alt">–</span> m</div>
     <div>trail <span id="trail">–</span></div>
-    <div>next <span id="nearest">–</span></div>
+    <div>hut <span id="nearest">–</span></div>
     <div>trip <span id="progress">–</span></div>
     <div>zoom <span id="zoomPct">100</span>%</div>
   </div>
@@ -683,18 +683,21 @@
       return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
     }
 
-    /* next hut ahead along the trail (toward Abisko = increasing route distance) */
+    /* closest hut along the trail in either direction (good for emergencies).
+       ↑ = ahead toward Abisko, ↓ = back toward Nikkaluokta. */
     function updateNextHut(curRD) {
       if (curRD == null) { nearestEl.textContent = '–'; return; }
-      let next = null;
+      let best = null;
+      let bestD = Infinity;
       for (const a of anchors) {
-        if (a.routeDist != null && a.routeDist > curRD + 60) {
-          if (!next || a.routeDist < next.routeDist) next = a;
-        }
+        if (a.routeDist == null) continue;
+        const d = Math.abs(a.routeDist - curRD);
+        if (d < bestD) { bestD = d; best = a; }
       }
-      if (!next) { nearestEl.textContent = 'Abisko (end)'; return; }
+      if (!best) { nearestEl.textContent = '–'; return; }
+      const arrow = bestD < 60 ? '◉' : (best.routeDist > curRD ? '↑' : '↓');
       nearestEl.textContent =
-        next.name.replace('Abiskojaure', 'Abiskoj') + ' ' + fmtKm(next.routeDist - curRD);
+        best.name.replace('Abiskojaure', 'Abiskoj') + ' ' + arrow + ' ' + fmtKm(bestD);
     }
 
     function updateProgress(curRD) {
