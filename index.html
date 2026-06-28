@@ -705,7 +705,38 @@
     }
 
     // optional PWA cache (one-time https visit → then offline)
-    /* standalone: map embedded, no service worker needed */
+    // PWA: cache this page for offline / Add to Home screen
+    const offlineBadge = document.getElementById('offlineBadge');
+    function setOfflineBadge(text) {
+      if (offlineBadge) offlineBadge.textContent = text;
+    }
+    function markOfflineReady() {
+      setOfflineBadge(navigator.onLine ? 'offline ready ✓' : 'offline · no signal');
+      if (!localStorage.getItem('kl-pwa-toast')) {
+        showToast('Saved for offline.<br>Add to <b>Home screen</b> in Firefox (menu) for trail use.');
+        localStorage.setItem('kl-pwa-toast', '1');
+      }
+    }
+    window.addEventListener('online', () => setOfflineBadge('offline ready ✓'));
+    window.addEventListener('offline', () => setOfflineBadge('offline · no signal'));
+
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      navigator.serviceWorker.register('./sw.js').then(reg => {
+        if (reg.active) markOfflineReady();
+        reg.addEventListener('updatefound', () => {
+          const worker = reg.installing;
+          if (!worker) return;
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed') markOfflineReady();
+          });
+        });
+        return navigator.serviceWorker.ready;
+      }).then(() => markOfflineReady()).catch(() => {
+        setOfflineBadge('offline map · self-contained');
+      });
+    } else {
+      setOfflineBadge('offline map · self-contained');
+    }
   </script>
 </body>
 </html>

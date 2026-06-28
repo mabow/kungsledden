@@ -50,10 +50,11 @@ out = out.replace(
   '<div class="offline-badge">offline map · self-contained</div>',
   '<div class="offline-badge" id="offlineBadge">offline map · loading…</div>'
 );
-out = out.replace(
-  '    // optional PWA cache (one-time https visit → then offline)\n    /* standalone: map embedded, no service worker needed */',
-  pwaBlock
-);
+const marker = '/* standalone: map embedded, no service worker needed */';
+if (!out.includes(marker)) {
+  throw new Error('PWA insertion point not found in standalone HTML — aborting so index.html is not built without a service worker.');
+}
+out = out.replace(marker, pwaBlock.trimStart());
 
 fs.writeFileSync(path.join(dir, 'index.html'), out);
-console.log('Wrote index.html from standalone + PWA');
+console.log('Wrote index.html from standalone + PWA (service worker injected)');
