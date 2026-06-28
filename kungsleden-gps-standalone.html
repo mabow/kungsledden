@@ -215,6 +215,7 @@
   <div class="hud">
     <div>GPS <span id="gpsStatus">off</span></div>
     <div>±<span id="acc">–</span> m</div>
+    <div>alt <span id="alt">–</span> m</div>
     <div>next <span id="nearest">–</span></div>
     <div>zoom <span id="zoomPct">100</span>%</div>
   </div>
@@ -234,6 +235,7 @@
     <div class="row"><span>lat</span><span class="val" id="tLat">–</span></div>
     <div class="row"><span>lon</span><span class="val" id="tLon">–</span></div>
     <div class="row"><span>±m</span><span class="val" id="tAcc">–</span></div>
+    <div class="row"><span>alt m</span><span class="val" id="tAlt">–</span></div>
     <div class="row"><span>map px</span><span class="val" id="tPx">–</span></div>
     <div class="row"><span>status</span><span class="val" id="tStatus">waiting…</span></div>
     <div class="row"><span>updated</span><span class="val" id="tTime">–</span></div>
@@ -269,14 +271,14 @@
     /* Hut pixel anchors on map2-labeled.png (1651×2788) — from label-map2.js
        Listed in trail (walking) order so projectOnTrail joins them correctly. */
     const anchors = [
-      { name: 'Nikkaluokta', lat: 67.851, lon: 19.025, x: 1564.7, y: 2592.9 },
-      { name: 'Kebnekaise', lat: 67.868, lon: 18.620, x: 844.2, y: 2532.5 },
-      { name: 'Singi', lat: 67.851, lon: 18.316, x: 293.3, y: 2607.2 },
-      { name: 'Sälka', lat: 67.946, lon: 18.282, x: 227.3, y: 2168.9 },
-      { name: 'Tjäktja', lat: 68.052, lon: 18.241, x: 151.7, y: 1663.2 },
-      { name: 'Alesjaure', lat: 68.137, lon: 18.415, x: 462.9, y: 1243.2 },
-      { name: 'Abiskojaure', lat: 68.286, lon: 18.591, x: 786.5, y: 500.7 },
-      { name: 'Abisko', lat: 68.358, lon: 18.784, x: 1134.4, y: 153.3 },
+      { name: 'Nikkaluokta', lat: 67.851, lon: 19.025, x: 1564.7, y: 2592.9, elev: 490 },
+      { name: 'Kebnekaise', lat: 67.868, lon: 18.620, x: 844.2, y: 2532.5, elev: 700 },
+      { name: 'Singi', lat: 67.851, lon: 18.316, x: 293.3, y: 2607.2, elev: 820 },
+      { name: 'Sälka', lat: 67.946, lon: 18.282, x: 227.3, y: 2168.9, elev: 900 },
+      { name: 'Tjäktja', lat: 68.052, lon: 18.241, x: 151.7, y: 1663.2, elev: 1000 },
+      { name: 'Alesjaure', lat: 68.137, lon: 18.415, x: 462.9, y: 1243.2, elev: 780 },
+      { name: 'Abiskojaure', lat: 68.286, lon: 18.591, x: 786.5, y: 500.7, elev: 670 },
+      { name: 'Abisko', lat: 68.358, lon: 18.784, x: 1134.4, y: 153.3, elev: 340 },
     ];
 
     const camps = [
@@ -540,7 +542,17 @@
     // --- GPS ---
     const gpsStatus = document.getElementById('gpsStatus');
     const accEl = document.getElementById('acc');
+    const altEl = document.getElementById('alt');
     const nearestEl = document.getElementById('nearest');
+
+    function formatAlt(altitude, altitudeAccuracy) {
+      if (altitude == null || Number.isNaN(altitude)) return '–';
+      const rounded = Math.round(altitude);
+      if (altitudeAccuracy != null && !Number.isNaN(altitudeAccuracy)) {
+        return rounded + ' ±' + Math.round(altitudeAccuracy);
+      }
+      return String(rounded);
+    }
     const toast = document.getElementById('toast');
 
     function showToast(msg, info) {
@@ -574,9 +586,10 @@
 
     function onPosition(pos) {
       hideToast();
-      const { latitude, longitude, accuracy } = pos.coords;
+      const { latitude, longitude, accuracy, altitude, altitudeAccuracy } = pos.coords;
       gpsStatus.textContent = 'on';
       accEl.textContent = accuracy ? Math.round(accuracy) : '–';
+      altEl.textContent = formatAlt(altitude, altitudeAccuracy);
 
       const onTrail = projectOnTrail(latitude, longitude);
       const mx = onTrail.x;
@@ -600,6 +613,7 @@
       document.getElementById('tLat').textContent = latitude.toFixed(5);
       document.getElementById('tLon').textContent = longitude.toFixed(5);
       document.getElementById('tAcc').textContent = accuracy ? Math.round(accuracy) : '–';
+      document.getElementById('tAlt').textContent = formatAlt(altitude, altitudeAccuracy);
       document.getElementById('tPx').textContent = Math.round(mx) + ', ' + Math.round(my);
       document.getElementById('tTime').textContent = new Date().toLocaleTimeString();
 
@@ -621,12 +635,14 @@
     }
 
     /** Simulate GPS fix — for pre-trip dot check (also used by test buttons). */
-    window.simulateGps = function (lat, lon, accM) {
+    window.simulateGps = function (lat, lon, accM, altM) {
       onPosition({
         coords: {
           latitude: lat,
           longitude: lon,
           accuracy: accM == null ? 12 : accM,
+          altitude: altM == null ? null : altM,
+          altitudeAccuracy: altM == null ? null : 5,
         },
       });
     };
@@ -640,7 +656,7 @@
       b.addEventListener('click', () => {
         follow = true;
         document.getElementById('followBtn').classList.add('on');
-        simulateGps(a.lat, a.lon, 8);
+        simulateGps(a.lat, a.lon, 8, a.elev);
       });
       testBtns.appendChild(b);
     });
