@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#1a4d8c" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <title>Kungsleden · offline GPS</title>
+  <link rel="manifest" href="gps-offline-manifest.json" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body { height: 100%; width: 100%; overflow: hidden; touch-action: none; }
+    body {
+      font-family: "Segoe UI", system-ui, sans-serif;
+      background: #1a1a1a;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    #viewport {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      background: #2a2a2a;
+      touch-action: none;
+      -ms-touch-action: none;
+    }
+    #layer {
+      position: absolute;
+      top: 0; left: 0;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+    #layer img {
+      display: block;
+      width: 1651px;
+      height: 2788px;
+      pointer-events: none;
+      user-select: none;
+      -webkit-user-drag: none;
+    }
+    #overlay {
+      position: absolute;
+      top: 0; left: 0;
+      width: 1651px;
+      height: 2788px;
+      pointer-events: none;
+    }
+
+    .gps-dot {
+      position: absolute;
+      width: 20px; height: 20px;
+      margin: -10px 0 0 -10px;
+      border-radius: 50%;
+      background: #1a73e8;
+      border: 3px solid #fff;
+      box-shadow: 0 0 0 1px rgba(0,0,0,0.35), 0 2px 8px rgba(0,0,0,0.5);
+      z-index: 10;
+      display: none;
+    }
+    .gps-dot.show { display: block; }
+    .gps-acc {
+      position: absolute;
+      border-radius: 50%;
+      border: 1px solid rgba(26,115,232,0.6);
+      background: rgba(26,115,232,0.12);
+      transform: translate(-50%, -50%);
+      display: none;
+      z-index: 9;
+    }
+    .gps-acc.show { display: block; }
+
+    /* huts & camps are already drawn on map2-labeled.png, so overlay pins are hidden */
+    .hut-pin { display: none; }
+    .camp-pin {
+      position: absolute;
+      width: 12px; height: 9px;
+      margin: -9px 0 0 -6px;
+    }
+
+    .hud {
+      position: absolute;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      padding: calc(env(safe-area-inset-top) + 8px) 12px 8px;
+      background: linear-gradient(rgba(0,0,0,0.75), transparent);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 700;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px 14px;
+      pointer-events: none;
+    }
+    .hud span { color: #8fd0ff; }
+
+    .controls {
+      position: absolute;
+      right: 12px;
+      bottom: calc(env(safe-area-inset-bottom) + 14px);
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .btn {
+      width: 52px; height: 52px;
+      border-radius: 50%;
+      border: none;
+      background: #fff;
+      color: #1a4d8c;
+      font-size: 11px;
+      font-weight: 800;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.45);
+      cursor: pointer;
+    }
+    .btn:active { background: #dde8f0; }
+    .btn.on { background: #1a73e8; color: #fff; }
+    .btn.wide {
+      width: auto; height: auto;
+      border-radius: 22px;
+      padding: 10px 14px;
+      font-size: 10px;
+    }
+
+    .toast {
+      position: absolute;
+      left: 50%;
+      bottom: calc(env(safe-area-inset-bottom) + 80px);
+      transform: translateX(-50%);
+      z-index: 110;
+      max-width: 90%;
+      background: #b00020;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 700;
+      line-height: 1.45;
+      padding: 12px 14px;
+      border-radius: 10px;
+      box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+      display: none;
+    }
+    .toast.show { display: block; }
+    .toast.info { background: #1a4d8c; }
+
+    .offline-badge {
+      position: absolute;
+      left: 12px;
+      bottom: calc(env(safe-area-inset-bottom) + 14px);
+      z-index: 100;
+      background: rgba(0,0,0,0.55);
+      color: #8f8;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 6px 10px;
+      border-radius: 8px;
+      pointer-events: none;
+    }
+
+    .gps-test {
+      position: absolute;
+      left: 12px;
+      top: calc(env(safe-area-inset-top) + 52px);
+      z-index: 100;
+      max-width: 220px;
+      background: rgba(0,0,0,0.82);
+      color: #eee;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1.45;
+      padding: 8px 10px;
+      border-radius: 8px;
+      border: 1px solid #444;
+    }
+    .gps-test h4 {
+      font-size: 9px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #8fd0ff;
+      margin-bottom: 4px;
+    }
+    .gps-test .row { display: flex; justify-content: space-between; gap: 8px; }
+    .gps-test .val { color: #fff; font-variant-numeric: tabular-nums; }
+    .gps-test .ok { color: #6f6; }
+    .gps-test .warn-txt { color: #fa0; }
+    .gps-test-btns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 6px;
+    }
+    .gps-test-btns button {
+      font-size: 8px;
+      font-weight: 700;
+      padding: 4px 6px;
+      border: 1px solid #555;
+      border-radius: 4px;
+      background: #333;
+      color: #ddd;
+      cursor: pointer;
+    }
+    .gps-test-btns button:active { background: #1a73e8; color: #fff; }
+  </style>
+</head>
+<body>
+  <div id="viewport">
+    <div id="layer">
+      <img id="mapImg" src="map2-labeled.png" width="1651" height="2788" alt="Kungsleden map" draggable="false" />
+      <div id="overlay">
+        <div id="gpsAcc" class="gps-acc"></div>
+        <div id="gpsDot" class="gps-dot"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="hud">
+    <div>GPS <span id="gpsStatus">off</span></div>
+    <div>±<span id="acc">–</span> m</div>
+    <div>next <span id="nearest">–</span></div>
+    <div>zoom <span id="zoomPct">100</span>%</div>
+  </div>
+
+  <div class="controls">
+    <button type="button" class="btn on" id="followBtn" title="Follow">◎</button>
+    <button type="button" class="btn" id="fitBtn" title="Fit route">⤢</button>
+    <button type="button" class="btn wide" id="campsBtn" style="display:none">camps</button>
+    <button type="button" class="btn wide" id="gpsBtn" title="Allow location">enable GPS</button>
+  </div>
+
+  <div class="offline-badge">offline map · map.jpg</div>
+  <div class="toast" id="toast"></div>
+
+  <div class="gps-test" id="gpsTest">
+    <h4>GPS test</h4>
+    <div class="row"><span>lat</span><span class="val" id="tLat">–</span></div>
+    <div class="row"><span>lon</span><span class="val" id="tLon">–</span></div>
+    <div class="row"><span>±m</span><span class="val" id="tAcc">–</span></div>
+    <div class="row"><span>map px</span><span class="val" id="tPx">–</span></div>
+    <div class="row"><span>status</span><span class="val" id="tStatus">waiting…</span></div>
+    <div class="row"><span>updated</span><span class="val" id="tTime">–</span></div>
+    <p style="margin-top:5px;font-size:8px;color:#aaa;font-weight:600;">Tap hut to simulate GPS (pre-trip check):</p>
+    <div class="gps-test-btns" id="testBtns"></div>
+  </div>
+
+  <script>
+    const MAP_W = 1651;
+    const MAP_H = 2788;
+
+    /* Map image load check — main reason a phone shows no background is a
+       missing or wrongly-named map2-labeled.png next to this HTML file. */
+    (function checkMapImage() {
+      const img = document.getElementById('mapImg');
+      const candidates = ['map2-labeled.png', 'map2.png', 'map.jpg'];
+      let i = 0;
+      img.addEventListener('error', () => {
+        i++;
+        if (i < candidates.length) {
+          img.src = candidates[i];
+        } else {
+          const t = document.getElementById('toast');
+          t.innerHTML = '<b>Map image not found.</b><br>Copy <b>map2-labeled.png</b> into the SAME folder as this HTML on the phone. Then reload.';
+          t.className = 'toast show';
+        }
+      });
+      img.addEventListener('load', () => {
+        document.getElementById('toast').className = 'toast';
+      });
+    })();
+
+    /* Hut pixel anchors on map2-labeled.png (1651×2788) — from label-map2.js
+       Listed in trail (walking) order so projectOnTrail joins them correctly. */
+    const anchors = [
+      { name: 'Nikkaluokta', lat: 67.851, lon: 19.025, x: 1564.7, y: 2592.9 },
+      { name: 'Kebnekaise', lat: 67.868, lon: 18.620, x: 844.2, y: 2532.5 },
+      { name: 'Singi', lat: 67.851, lon: 18.316, x: 293.3, y: 2607.2 },
+      { name: 'Sälka', lat: 67.946, lon: 18.282, x: 227.3, y: 2168.9 },
+      { name: 'Tjäktja', lat: 68.052, lon: 18.241, x: 151.7, y: 1663.2 },
+      { name: 'Alesjaure', lat: 68.137, lon: 18.415, x: 462.9, y: 1243.2 },
+      { name: 'Abiskojaure', lat: 68.286, lon: 18.591, x: 786.5, y: 500.7 },
+      { name: 'Abisko', lat: 68.358, lon: 18.784, x: 1134.4, y: 153.3 },
+    ];
+
+    const camps = [
+      { name: 'Laddjujavri', lat: 67.843, lon: 18.985 },
+      { name: 'Tarfalajåkka', lat: 67.864, lon: 18.665 },
+      { name: 'Lassajavri', lat: 67.859, lon: 18.470 },
+      { name: 'Singi valley', lat: 67.850, lon: 18.310, x: 102, y: 934 },
+      { name: 'Tjäktjajakka', lat: 67.944, lon: 18.278, x: 72, y: 798 },
+      { name: 'Pre-Tjäktja', lat: 68.045, lon: 18.242 },
+      { name: 'Tjäktja pass', lat: 68.019, lon: 18.247, x: 42, y: 672 },
+      { name: 'Álisvággi', lat: 68.095, lon: 18.370 },
+      { name: 'Aliseatnu', lat: 68.132, lon: 18.412 },
+      { name: 'Rádujávri', lat: 68.215, lon: 18.505 },
+      { name: 'Siellajohka', lat: 68.268, lon: 18.565 },
+      { name: 'Ábeskojávri †', lat: 68.287, lon: 18.598, x: 220, y: 282 },
+      { name: 'Nissonjohka †', lat: 68.328, lon: 18.753 },
+    ];
+
+    const tentSvg = '<svg class="camp-pin" viewBox="0 0 16 12"><path d="M2,11 L8,2 L14,11 Z" fill="#1e7a50" stroke="#0d3d28" stroke-width="0.8"/><line x1="1" y1="11" x2="15" y2="11" stroke="#0d3d28" stroke-width="0.6"/></svg>';
+
+    // --- geo → map pixel (affine from hut anchors) ---
+    function solveLs(A, b) {
+      const m = A[0].length;
+      const ata = Array.from({ length: m }, () => Array(m).fill(0));
+      const atb = Array(m).fill(0);
+      for (let i = 0; i < A.length; i++) {
+        for (let r = 0; r < m; r++) {
+          atb[r] += A[i][r] * b[i];
+          for (let c = 0; c < m; c++) ata[r][c] += A[i][r] * A[i][c];
+        }
+      }
+      const n = m;
+      const a = ata.map((row, i) => [...row, atb[i]]);
+      for (let col = 0; col < n; col++) {
+        let pivot = col;
+        for (let r = col + 1; r < n; r++) {
+          if (Math.abs(a[r][col]) > Math.abs(a[pivot][col])) pivot = r;
+        }
+        [a[col], a[pivot]] = [a[pivot], a[col]];
+        const div = a[col][col] || 1e-9;
+        for (let c = col; c <= n; c++) a[col][c] /= div;
+        for (let r = 0; r < n; r++) {
+          if (r === col) continue;
+          const f = a[r][col];
+          for (let c = col; c <= n; c++) a[r][c] -= f * a[col][c];
+        }
+      }
+      return a.map(row => row[n]);
+    }
+
+    const A = anchors.map(p => [p.lon, p.lat, 1]);
+    const wx = solveLs(A, anchors.map(p => p.x));
+    const wy = solveLs(A, anchors.map(p => p.y));
+
+    function project(lat, lon) {
+      return {
+        x: wx[0] * lon + wx[1] * lat + wx[2],
+        y: wy[0] * lon + wy[1] * lat + wy[2],
+      };
+    }
+
+    function geoDist(a, b) {
+      const dlat = b.lat - a.lat;
+      const dlon = b.lon - a.lon;
+      const mlat = ((a.lat + b.lat) / 2) * Math.PI / 180;
+      return Math.hypot(dlat * 111000, dlon * 111000 * Math.cos(mlat));
+    }
+
+    function projectOnTrail(lat, lon) {
+      const pt = { lat, lon };
+      let best = null;
+      for (let i = 0; i < anchors.length - 1; i++) {
+        const a = anchors[i];
+        const b = anchors[i + 1];
+        const seg = geoDist(a, b);
+        if (seg < 1) continue;
+        let t = geoDist(a, pt) / seg;
+        t = Math.max(0, Math.min(1, t));
+        const plat = a.lat + t * (b.lat - a.lat);
+        const plon = a.lon + t * (b.lon - a.lon);
+        const err = geoDist({ lat: plat, lon: plon }, pt);
+        if (!best || err < best.err) {
+          best = {
+            err,
+            x: a.x + t * (b.x - a.x),
+            y: a.y + t * (b.y - a.y),
+          };
+        }
+      }
+      return best || project(lat, lon);
+    }
+
+    function projectCamp(camp) {
+      if (camp.x != null) return { x: camp.x, y: camp.y };
+      return projectOnTrail(camp.lat, camp.lon);
+    }
+
+    // --- pan / zoom ---
+    const viewport = document.getElementById('viewport');
+    const layer = document.getElementById('layer');
+    const overlay = document.getElementById('overlay');
+    const gpsDot = document.getElementById('gpsDot');
+    const gpsAcc = document.getElementById('gpsAcc');
+
+    let scale = 1;
+    let panX = 0;
+    let panY = 0;
+    let follow = true;
+    let lastGpsMap = null;
+    let showCamps = false;
+
+    function applyTransform() {
+      layer.style.transform = `translate(${panX}px,${panY}px) scale(${scale})`;
+      document.getElementById('zoomPct').textContent = Math.round(scale * 100);
+    }
+
+    function fitRoute() {
+      const vw = viewport.clientWidth;
+      const vh = viewport.clientHeight;
+      scale = Math.min(vw / MAP_W, vh / MAP_H) * 0.92;
+      panX = (vw - MAP_W * scale) / 2;
+      panY = (vh - MAP_H * scale) / 2;
+      applyTransform();
+    }
+
+    function centerOnMapPx(mx, my, animate) {
+      const vw = viewport.clientWidth;
+      const vh = viewport.clientHeight;
+      panX = vw / 2 - mx * scale;
+      panY = vh / 2 - my * scale;
+      applyTransform();
+    }
+
+    function mapPxToScreen(mx, my) {
+      return { x: panX + mx * scale, y: panY + my * scale };
+    }
+
+    fitRoute();
+    window.addEventListener('resize', () => {
+      if (follow && lastGpsMap) centerOnMapPx(lastGpsMap.x, lastGpsMap.y);
+      else fitRoute();
+    });
+
+    // hut pins (always)
+    anchors.forEach(a => {
+      const el = document.createElement('div');
+      el.className = 'hut-pin';
+      el.style.left = a.x + 'px';
+      el.style.top = a.y + 'px';
+      el.title = a.name;
+      overlay.appendChild(el);
+    });
+
+    const campLayer = document.createElement('div');
+    campLayer.id = 'campLayer';
+    campLayer.style.display = 'none';
+    overlay.appendChild(campLayer);
+
+    function renderCamps() {
+      campLayer.innerHTML = '';
+      camps.forEach(c => {
+        const p = projectCamp(c);
+        const el = document.createElement('div');
+        el.style.position = 'absolute';
+        el.style.left = p.x + 'px';
+        el.style.top = p.y + 'px';
+        el.innerHTML = tentSvg;
+        el.title = c.name;
+        campLayer.appendChild(el);
+      });
+    }
+    renderCamps();
+
+    // touch / mouse pan zoom
+    let touches = [];
+    let dragStart = null;
+    let pinchStart = null;
+
+    viewport.addEventListener('pointerdown', e => {
+      if (e.button !== 0 && e.pointerType === 'mouse') return;
+      viewport.setPointerCapture(e.pointerId);
+      touches.push({ id: e.pointerId, x: e.clientX, y: e.clientY });
+      if (touches.length === 1) {
+        dragStart = { x: e.clientX, y: e.clientY, panX, panY };
+        follow = false;
+        document.getElementById('followBtn').classList.remove('on');
+      } else if (touches.length === 2) {
+        const dx = touches[1].x - touches[0].x;
+        const dy = touches[1].y - touches[0].y;
+        const midX = (touches[0].x + touches[1].x) / 2;
+        const midY = (touches[0].y + touches[1].y) / 2;
+        pinchStart = { dist: Math.hypot(dx, dy), scale, panX, panY, midX, midY };
+        dragStart = null;
+      }
+    });
+
+    viewport.addEventListener('pointermove', e => {
+      const i = touches.findIndex(t => t.id === e.pointerId);
+      if (i < 0) return;
+      touches[i] = { id: e.pointerId, x: e.clientX, y: e.clientY };
+
+      if (touches.length === 2 && pinchStart) {
+        const dx = touches[1].x - touches[0].x;
+        const dy = touches[1].y - touches[0].y;
+        const dist = Math.hypot(dx, dy);
+        const midX = (touches[0].x + touches[1].x) / 2;
+        const midY = (touches[0].y + touches[1].y) / 2;
+        const newScale = Math.max(0.35, Math.min(6, pinchStart.scale * (dist / pinchStart.dist)));
+        const mx = (midX - pinchStart.panX) / pinchStart.scale;
+        const my = (midY - pinchStart.panY) / pinchStart.scale;
+        scale = newScale;
+        panX = midX - mx * scale;
+        panY = midY - my * scale;
+        applyTransform();
+      } else if (touches.length === 1 && dragStart) {
+        panX = dragStart.panX + (e.clientX - dragStart.x);
+        panY = dragStart.panY + (e.clientY - dragStart.y);
+        applyTransform();
+      }
+    });
+
+    function endPointer(e) {
+      touches = touches.filter(t => t.id !== e.pointerId);
+      if (touches.length < 2) pinchStart = null;
+      if (touches.length === 0) dragStart = null;
+    }
+    viewport.addEventListener('pointerup', endPointer);
+    viewport.addEventListener('pointercancel', endPointer);
+
+    // wheel zoom (desktop test)
+    viewport.addEventListener('wheel', e => {
+      e.preventDefault();
+      follow = false;
+      document.getElementById('followBtn').classList.remove('on');
+      const factor = e.deltaY < 0 ? 1.12 : 0.89;
+      const newScale = Math.max(0.35, Math.min(6, scale * factor));
+      const mx = (e.clientX - panX) / scale;
+      const my = (e.clientY - panY) / scale;
+      scale = newScale;
+      panX = e.clientX - mx * scale;
+      panY = e.clientY - my * scale;
+      applyTransform();
+    }, { passive: false });
+
+    document.getElementById('followBtn').addEventListener('click', () => {
+      follow = !follow;
+      document.getElementById('followBtn').classList.toggle('on', follow);
+      if (follow && lastGpsMap) centerOnMapPx(lastGpsMap.x, lastGpsMap.y);
+    });
+    document.getElementById('fitBtn').addEventListener('click', () => {
+      follow = false;
+      document.getElementById('followBtn').classList.remove('on');
+      fitRoute();
+    });
+    document.getElementById('campsBtn').addEventListener('click', () => {
+      showCamps = !showCamps;
+      campLayer.style.display = showCamps ? 'block' : 'none';
+      document.getElementById('campsBtn').classList.toggle('on', showCamps);
+    });
+
+    // --- GPS ---
+    const gpsStatus = document.getElementById('gpsStatus');
+    const accEl = document.getElementById('acc');
+    const nearestEl = document.getElementById('nearest');
+    const toast = document.getElementById('toast');
+
+    function showToast(msg, info) {
+      toast.innerHTML = msg;
+      toast.className = 'toast show' + (info ? ' info' : '');
+    }
+    function hideToast() { toast.className = 'toast'; }
+
+    function haversineM(a, b) {
+      const R = 6371000;
+      const dLat = (b[0] - a[0]) * Math.PI / 180;
+      const dLon = (b[1] - a[1]) * Math.PI / 180;
+      const la1 = a[0] * Math.PI / 180;
+      const la2 = b[0] * Math.PI / 180;
+      const h = Math.sin(dLat / 2) ** 2 + Math.cos(la1) * Math.cos(la2) * Math.sin(dLon / 2) ** 2;
+      return 2 * R * Math.asin(Math.sqrt(h));
+    }
+
+    function updateNearest(lat, lon) {
+      let best = null;
+      let bestD = Infinity;
+      for (const a of anchors) {
+        const d = haversineM([lat, lon], [a.lat, a.lon]);
+        if (d < bestD) { bestD = d; best = a; }
+      }
+      if (best) {
+        const t = bestD >= 1000 ? (bestD / 1000).toFixed(1) + ' km' : Math.round(bestD) + ' m';
+        nearestEl.textContent = best.name + ' ' + t;
+      }
+    }
+
+    function onPosition(pos) {
+      hideToast();
+      const { latitude, longitude, accuracy } = pos.coords;
+      gpsStatus.textContent = 'on';
+      accEl.textContent = accuracy ? Math.round(accuracy) : '–';
+
+      const onTrail = projectOnTrail(latitude, longitude);
+      const mx = onTrail.x;
+      const my = onTrail.y;
+      lastGpsMap = { x: mx, y: my };
+
+      gpsDot.style.left = mx + 'px';
+      gpsDot.style.top = my + 'px';
+      gpsDot.classList.add('show');
+
+      const M_PER_PX = 22.6; // map2-labeled.png ≈ 44 px per km (from hut spacing)
+      const accPx = Math.max(6, (accuracy || 30) / M_PER_PX);
+      gpsAcc.style.left = mx + 'px';
+      gpsAcc.style.top = my + 'px';
+      gpsAcc.style.width = accPx * 2 + 'px';
+      gpsAcc.style.height = accPx * 2 + 'px';
+      gpsAcc.classList.add('show');
+
+      updateNearest(latitude, longitude);
+
+      document.getElementById('tLat').textContent = latitude.toFixed(5);
+      document.getElementById('tLon').textContent = longitude.toFixed(5);
+      document.getElementById('tAcc').textContent = accuracy ? Math.round(accuracy) : '–';
+      document.getElementById('tPx').textContent = Math.round(mx) + ', ' + Math.round(my);
+      document.getElementById('tTime').textContent = new Date().toLocaleTimeString();
+
+      const offMap = mx < -40 || mx > MAP_W + 40 || my < -40 || my > MAP_H + 40;
+      const tStatus = document.getElementById('tStatus');
+      if (offMap) {
+        tStatus.textContent = 'off map';
+        tStatus.className = 'val warn-txt';
+        showToast('GPS position is off the map — check you are on the Kungsleden corridor.', true);
+      } else {
+        tStatus.textContent = 'on map';
+        tStatus.className = 'val ok';
+      }
+
+      if (follow) {
+        if (scale < 0.8) scale = 1.2;
+        centerOnMapPx(mx, my);
+      }
+    }
+
+    /** Simulate GPS fix — for pre-trip dot check (also used by test buttons). */
+    window.simulateGps = function (lat, lon, accM) {
+      onPosition({
+        coords: {
+          latitude: lat,
+          longitude: lon,
+          accuracy: accM == null ? 12 : accM,
+        },
+      });
+    };
+
+    const testBtns = document.getElementById('testBtns');
+    anchors.forEach(a => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = a.name.replace('Abiskojaure', 'Abiskoj').slice(0, 10);
+      b.title = 'Simulate GPS at ' + a.name;
+      b.addEventListener('click', () => {
+        follow = true;
+        document.getElementById('followBtn').classList.add('on');
+        simulateGps(a.lat, a.lon, 8);
+      });
+      testBtns.appendChild(b);
+    });
+
+    function onError(err) {
+      gpsStatus.textContent = 'err';
+      document.getElementById('tStatus').textContent = 'error ' + err.code;
+      document.getElementById('tStatus').className = 'val warn-txt';
+      let msg = 'Location unavailable.';
+      if (err.code === 1) msg = 'Allow location permission for this site.';
+      else if (err.code === 2) msg = 'No GPS fix — open sky, enable location.';
+      else if (err.code === 3) msg = 'GPS timed out — retrying…';
+
+      if (location.protocol === 'file:') {
+        msg += '<br><br><b>Android tip:</b> Chrome blocks GPS on opened files. Copy this folder to the phone and open via a tiny local server (e.g. <i>HTTP Server</i> app), or install once from https (see README in folder). Map works offline either way.';
+      }
+      showToast(msg);
+    }
+
+    let gpsWatchId = null;
+    function startGps() {
+      if (!('geolocation' in navigator)) {
+        gpsStatus.textContent = 'n/a';
+        showToast('No geolocation in this browser.');
+        return;
+      }
+      if (gpsWatchId !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+        gpsWatchId = null;
+      }
+      gpsStatus.textContent = '…';
+      // explicit one-shot request forces the Allow/Block prompt on a user tap
+      navigator.geolocation.getCurrentPosition(onPosition, onError, {
+        enableHighAccuracy: true,
+        maximumAge: 0,
+        timeout: 20000,
+      });
+      gpsWatchId = navigator.geolocation.watchPosition(onPosition, onError, {
+        enableHighAccuracy: true,
+        maximumAge: 1500,
+        timeout: 20000,
+      });
+    }
+
+    document.getElementById('gpsBtn').addEventListener('click', () => {
+      follow = true;
+      document.getElementById('followBtn').classList.add('on');
+      showToast('Requesting location… tap <b>Allow</b> if your phone asks.');
+      startGps();
+    });
+
+    startGps();
+
+    // ?mock=Sälka in URL → simulate that hut on load (desktop / pre-trip test)
+    const mockParam = new URLSearchParams(location.search).get('mock');
+    if (mockParam) {
+      const hut = anchors.find(a => a.name.toLowerCase().includes(mockParam.toLowerCase()));
+      if (hut) setTimeout(() => simulateGps(hut.lat, hut.lon, 10), 400);
+    }
+
+    // optional PWA cache (one-time https visit → then offline)
+    if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+      navigator.serviceWorker.register('gps-offline-sw.js').catch(() => {});
+    }
+  </script>
+</body>
+</html>
