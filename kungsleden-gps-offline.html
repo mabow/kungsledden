@@ -60,6 +60,22 @@
     }
     .gps-dot.show { display: block; }
     .gps-dot.off { background: #e8521a; }
+    .gps-dot.stale { background: #9aa0a6; }
+    .gps-heading {
+      position: absolute;
+      width: 0; height: 0;
+      border-left: 9px solid transparent;
+      border-right: 9px solid transparent;
+      border-bottom: 16px solid #1a73e8;
+      margin: -16px 0 0 -9px;
+      transform-origin: 9px 16px;
+      z-index: 9;
+      display: none;
+      filter: drop-shadow(0 0 1px rgba(0,0,0,0.6));
+    }
+    .gps-heading.show { display: block; }
+    .gps-heading.off { border-bottom-color: #e8521a; }
+    .gps-heading.stale { border-bottom-color: #9aa0a6; }
     #toTrail {
       position: absolute;
       top: 0; left: 0;
@@ -229,6 +245,7 @@
             stroke-linecap="round" marker-end="url(#arrowHead)" />
         </svg>
         <div id="gpsAcc" class="gps-acc"></div>
+        <div id="gpsHeading" class="gps-heading"></div>
         <div id="gpsDot" class="gps-dot"></div>
       </div>
     </div>
@@ -240,12 +257,14 @@
     <div>alt <span id="alt">–</span> m</div>
     <div>trail <span id="trail">–</span></div>
     <div>next <span id="nearest">–</span></div>
+    <div>trip <span id="progress">–</span></div>
     <div>zoom <span id="zoomPct">100</span>%</div>
   </div>
 
   <div class="controls">
     <button type="button" class="btn on" id="followBtn" title="Follow">◎</button>
     <button type="button" class="btn" id="fitBtn" title="Fit route">⤢</button>
+    <button type="button" class="btn" id="testToggle" title="GPS test panel">ⓘ</button>
     <button type="button" class="btn wide" id="campsBtn" style="display:none">camps</button>
     <button type="button" class="btn wide" id="gpsBtn" title="Allow location">enable GPS</button>
   </div>
@@ -253,7 +272,7 @@
   <div class="offline-badge">offline map · map.jpg</div>
   <div class="toast" id="toast"></div>
 
-  <div class="gps-test" id="gpsTest">
+  <div class="gps-test" id="gpsTest" style="display:none">
     <h4>GPS test</h4>
     <div class="row"><span>lat</span><span class="val" id="tLat">–</span></div>
     <div class="row"><span>lon</span><span class="val" id="tLon">–</span></div>
@@ -409,10 +428,25 @@
     const M_PER_DEG_LON = Math.cos(ROUTE_LAT0 * Math.PI / 180) * 111320;
     const M_PER_DEG_LAT = 110540;
 
+    /* cumulative along-route distance (metres) for progress + next-hut readouts */
+    const ROUTE_CUM = [];
+    let ROUTE_TOTAL = 0;
+    (function buildCum() {
+      if (!ROUTE.length) return;
+      ROUTE_CUM[0] = 0;
+      for (let i = 1; i < ROUTE.length; i++) {
+        const a = ROUTE[i - 1], b = ROUTE[i];
+        const dx = (b[1] - a[1]) * M_PER_DEG_LON;
+        const dy = (b[0] - a[0]) * M_PER_DEG_LAT;
+        ROUTE_CUM[i] = ROUTE_CUM[i - 1] + Math.hypot(dx, dy);
+      }
+      ROUTE_TOTAL = ROUTE_CUM[ROUTE.length - 1];
+    })();
+
     function nearestOnRoute(lat, lon) {
       if (!ROUTE.length) {
         const p = projectOnTrail(lat, lon);
-        return { dist: null, x: p.x, y: p.y };
+        return { dist: null, x: p.x, y: p.y, routeDist: null };
       }
       const px = lon * M_PER_DEG_LON;
       const py = lat * M_PER_DEG_LAT;
@@ -429,11 +463,23 @@
         const sx = ax + t * dx, sy = ay + t * dy;
         const d = Math.hypot(px - sx, py - sy);
         if (!best || d < best.dist) {
-          best = { dist: d, lat: a[0] + t * (b[0] - a[0]), lon: a[1] + t * (b[1] - a[1]) };
+          const segLen = Math.sqrt(len2);
+          best = {
+            dist: d,
+            lat: a[0] + t * (b[0] - a[0]),
+            lon: a[1] + t * (b[1] - a[1]),
+            routeDist: ROUTE_CUM[i] + t * segLen,
+          };
         }
       }
       return best;
     }
+
+    /* fix each hut's position along the route (once) for next-hut + progress */
+    anchors.forEach(a => {
+      const n = nearestOnRoute(a.lat, a.lon);
+      a.routeDist = (n && n.routeDist != null) ? n.routeDist : null;
+    });
 
     // --- pan / zoom ---
     const viewport = document.getElementById('viewport');
@@ -441,6 +487,7 @@
     const overlay = document.getElementById('overlay');
     const gpsDot = document.getElementById('gpsDot');
     const gpsAcc = document.getElementById('gpsAcc');
+    const gpsHeading = document.getElementById('gpsHeading');
 
     let scale = 1;
     let panX = 0;
@@ -630,23 +677,87 @@
       return 2 * R * Math.asin(Math.sqrt(h));
     }
 
-    function updateNearest(lat, lon) {
-      let best = null;
-      let bestD = Infinity;
+    const progressEl = document.getElementById('progress');
+
+    function fmtKm(m) {
+      return m >= 1000 ? (m / 1000).toFixed(1) + ' km' : Math.round(m) + ' m';
+    }
+
+    /* next hut ahead along the trail (toward Abisko = increasing route distance) */
+    function updateNextHut(curRD) {
+      if (curRD == null) { nearestEl.textContent = '–'; return; }
+      let next = null;
       for (const a of anchors) {
-        const d = haversineM([lat, lon], [a.lat, a.lon]);
-        if (d < bestD) { bestD = d; best = a; }
+        if (a.routeDist != null && a.routeDist > curRD + 60) {
+          if (!next || a.routeDist < next.routeDist) next = a;
+        }
       }
-      if (best) {
-        const t = bestD >= 1000 ? (bestD / 1000).toFixed(1) + ' km' : Math.round(bestD) + ' m';
-        nearestEl.textContent = best.name + ' ' + t;
+      if (!next) { nearestEl.textContent = 'Abisko (end)'; return; }
+      nearestEl.textContent =
+        next.name.replace('Abiskojaure', 'Abiskoj') + ' ' + fmtKm(next.routeDist - curRD);
+    }
+
+    function updateProgress(curRD) {
+      if (curRD == null || !ROUTE_TOTAL) { progressEl.textContent = '–'; return; }
+      const pct = Math.round((curRD / ROUTE_TOTAL) * 100);
+      progressEl.textContent =
+        (curRD / 1000).toFixed(1) + '/' + Math.round(ROUTE_TOTAL / 1000) + ' km · ' + pct + '%';
+    }
+
+    // --- compass heading (device orientation) ---
+    let headingDeg = null;
+    function applyHeading() {
+      if (headingDeg == null || !gpsDot.classList.contains('show') || !lastGpsMap) {
+        gpsHeading.classList.remove('show');
+        return;
+      }
+      gpsHeading.style.left = lastGpsMap.x + 'px';
+      gpsHeading.style.top = lastGpsMap.y + 'px';
+      gpsHeading.style.transform = 'rotate(' + headingDeg + 'deg)';
+      gpsHeading.classList.toggle('off', gpsDot.classList.contains('off'));
+      gpsHeading.classList.toggle('stale', gpsDot.classList.contains('stale'));
+      gpsHeading.classList.add('show');
+    }
+    function onOrient(e) {
+      let h = null;
+      if (typeof e.webkitCompassHeading === 'number') h = e.webkitCompassHeading; // iOS
+      else if (e.alpha != null) h = 360 - e.alpha; // Android (absolute)
+      if (h != null && !Number.isNaN(h)) {
+        headingDeg = h;
+        applyHeading();
       }
     }
+    window.addEventListener('deviceorientationabsolute', onOrient, true);
+    window.addEventListener('deviceorientation', onOrient, true);
+    function requestOrientationPermission() {
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission()
+          .then(s => { if (s === 'granted') window.addEventListener('deviceorientation', onOrient, true); })
+          .catch(() => {});
+      }
+    }
+
+    // --- GPS staleness watchdog ---
+    let lastFixMs = null;
+    const STALE_MS = 15000;
+    setInterval(() => {
+      if (lastFixMs == null) return;
+      const age = Date.now() - lastFixMs;
+      if (age > STALE_MS) {
+        gpsStatus.textContent = 'stale ' + Math.round(age / 1000) + 's';
+        gpsDot.classList.add('stale');
+        gpsHeading.classList.add('stale');
+      }
+    }, 3000);
 
     function onPosition(pos) {
       hideToast();
       const { latitude, longitude, accuracy, altitude, altitudeAccuracy } = pos.coords;
+      lastFixMs = Date.now();
       gpsStatus.textContent = 'on';
+      gpsDot.classList.remove('stale');
+      gpsHeading.classList.remove('stale');
       accEl.textContent = accuracy ? Math.round(accuracy) : '–';
       altEl.textContent = formatAlt(altitude, altitudeAccuracy);
 
@@ -674,6 +785,7 @@
       gpsDot.style.top = my + 'px';
       gpsDot.classList.add('show');
       gpsDot.classList.toggle('off', isOff);
+      applyHeading();
 
       // fixed-length arrow from the dot pointing toward the closest point on the trail
       const toTrail = document.getElementById('toTrail');
@@ -705,7 +817,9 @@
       gpsAcc.style.height = accPx * 2 + 'px';
       gpsAcc.classList.add('show');
 
-      updateNearest(latitude, longitude);
+      const curRD = near && near.routeDist != null ? near.routeDist : null;
+      updateNextHut(curRD);
+      updateProgress(curRD);
 
       document.getElementById('tLat').textContent = latitude.toFixed(5);
       document.getElementById('tLon').textContent = longitude.toFixed(5);
@@ -825,8 +939,21 @@
       follow = true;
       document.getElementById('followBtn').classList.add('on');
       showToast('Requesting location… tap <b>Allow</b> if your phone asks.');
+      requestOrientationPermission();
       startGps();
     });
+
+    // GPS test panel: hidden by default, toggle with the ⓘ button (or ?test=1)
+    const gpsTestPanel = document.getElementById('gpsTest');
+    const testToggle = document.getElementById('testToggle');
+    function setTestPanel(show) {
+      gpsTestPanel.style.display = show ? 'block' : 'none';
+      testToggle.classList.toggle('on', show);
+    }
+    testToggle.addEventListener('click', () => {
+      setTestPanel(gpsTestPanel.style.display === 'none');
+    });
+    if (new URLSearchParams(location.search).get('test') === '1') setTestPanel(true);
 
     startGps();
 
