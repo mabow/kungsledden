@@ -1,4 +1,4 @@
-const CACHE = 'kl-gps-pages-v4-offtrail';
+const CACHE = 'kl-gps-pages-v5-arrow';
 const PRECACHE = ['./', './index.html', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {

@@ -60,6 +60,15 @@
     }
     .gps-dot.show { display: block; }
     .gps-dot.off { background: #e8521a; }
+    #toTrail {
+      position: absolute;
+      top: 0; left: 0;
+      pointer-events: none;
+      overflow: visible;
+      display: none;
+      z-index: 8;
+    }
+    #toTrail.show { display: block; }
     .gps-acc {
       position: absolute;
       border-radius: 50%;
@@ -208,6 +217,17 @@
     <div id="layer">
       <img id="mapImg" src="map2-labeled.png" width="1651" height="2788" alt="Kungsleden map" draggable="false" />
       <div id="overlay">
+        <svg id="toTrail" width="1651" height="2788" viewBox="0 0 1651 2788">
+          <defs>
+            <marker id="arrowHead" viewBox="0 0 10 10" markerWidth="26" markerHeight="26"
+              refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse">
+              <path d="M0,0 L10,5 L0,10 Z" fill="#e8521a" />
+            </marker>
+          </defs>
+          <line id="toTrailLine" x1="0" y1="0" x2="0" y2="0"
+            stroke="#e8521a" stroke-width="9" stroke-dasharray="16 12"
+            stroke-linecap="round" marker-end="url(#arrowHead)" />
+        </svg>
         <div id="gpsAcc" class="gps-acc"></div>
         <div id="gpsDot" class="gps-dot"></div>
       </div>
@@ -654,6 +674,28 @@
       gpsDot.style.top = my + 'px';
       gpsDot.classList.add('show');
       gpsDot.classList.toggle('off', isOff);
+
+      // fixed-length arrow from the dot pointing toward the closest point on the trail
+      const toTrail = document.getElementById('toTrail');
+      if (isOff && near.lat != null) {
+        const tp = project(near.lat, near.lon);
+        const line = document.getElementById('toTrailLine');
+        const ddx = tp.x - mx;
+        const ddy = tp.y - my;
+        const len = Math.hypot(ddx, ddy) || 1;
+        const ux = ddx / len;
+        const uy = ddy / len;
+        // constant-length pointer so direction is always clear, regardless of how far off
+        const start = 22;  // begin just outside the dot
+        const end = 92;    // fixed pointer length (map px)
+        line.setAttribute('x1', mx + ux * start);
+        line.setAttribute('y1', my + uy * start);
+        line.setAttribute('x2', mx + ux * end);
+        line.setAttribute('y2', my + uy * end);
+        toTrail.classList.add('show');
+      } else {
+        toTrail.classList.remove('show');
+      }
 
       const M_PER_PX = 22.6; // map2-labeled.png ≈ 44 px per km (from hut spacing)
       const accPx = Math.max(6, (accuracy || 30) / M_PER_PX);
