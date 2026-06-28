@@ -6,6 +6,9 @@
   <meta name="theme-color" content="#1a4d8c" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="KL GPS" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icon-192.png" />
   <title>Kungsleden · offline GPS</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -233,7 +236,7 @@
     <button type="button" class="btn wide" id="gpsBtn" title="Allow location">enable GPS</button>
   </div>
 
-  <div class="offline-badge">offline map · self-contained</div>
+  <div class="offline-badge" id="offlineBadge">offline map · loading…</div>
   <div class="toast" id="toast"></div>
 
   <div class="gps-test" id="gpsTest">
@@ -707,8 +710,38 @@
       if (hut) setTimeout(() => simulateGps(hut.lat, hut.lon, 10), 400);
     }
 
-    // optional PWA cache (one-time https visit → then offline)
-    /* standalone: map embedded, no service worker needed */
+    // PWA: cache this page for offline / Add to Home screen
+    const offlineBadge = document.getElementById('offlineBadge');
+    function setOfflineBadge(text) {
+      if (offlineBadge) offlineBadge.textContent = text;
+    }
+    function markOfflineReady() {
+      setOfflineBadge(navigator.onLine ? 'offline ready ✓' : 'offline · no signal');
+      if (!localStorage.getItem('kl-pwa-toast')) {
+        showToast('Saved for offline.<br>Add to <b>Home screen</b> in Firefox (menu) for trail use.');
+        localStorage.setItem('kl-pwa-toast', '1');
+      }
+    }
+    window.addEventListener('online', () => setOfflineBadge('offline ready ✓'));
+    window.addEventListener('offline', () => setOfflineBadge('offline · no signal'));
+
+    if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
+      navigator.serviceWorker.register('./sw.js').then(reg => {
+        if (reg.active) markOfflineReady();
+        reg.addEventListener('updatefound', () => {
+          const worker = reg.installing;
+          if (!worker) return;
+          worker.addEventListener('statechange', () => {
+            if (worker.state === 'installed') markOfflineReady();
+          });
+        });
+        return navigator.serviceWorker.ready;
+      }).then(() => markOfflineReady()).catch(() => {
+        setOfflineBadge('offline map · self-contained');
+      });
+    } else {
+      setOfflineBadge('offline map · self-contained');
+    }
   </script>
 </body>
 </html>
